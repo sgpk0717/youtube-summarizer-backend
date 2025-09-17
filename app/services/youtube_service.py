@@ -128,7 +128,12 @@ class YouTubeService(LoggerMixin):
                 return text, "ko"
                 
             except Exception as e:
-                self.log_debug(f"한국어 자막 없음: {str(e)}")
+                import traceback
+                self.log_debug(f"한국어 자막 없음", data={
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "traceback": traceback.format_exc()
+                })
             
             # 2. 영어 자막 시도
             try:
@@ -147,7 +152,12 @@ class YouTubeService(LoggerMixin):
                 return text, "en"
                 
             except Exception as e:
-                self.log_debug(f"영어 자막 없음: {str(e)}")
+                import traceback
+                self.log_debug(f"영어 자막 없음", data={
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "traceback": traceback.format_exc()
+                })
             
             # 3. 사용 가능한 아무 자막이나 가져오기
             try:
@@ -156,18 +166,41 @@ class YouTubeService(LoggerMixin):
                 # 사용 가능한 자막 목록 확인
                 transcript_list = self.api.list(video_id)
                 
-                # 로깅을 위한 자막 정보 수집
+                # 로깅을 위한 자막 정보 수집 - 더 상세한 정보 포함
                 available_languages = []
                 for transcript in transcript_list:
+                    # 모든 속성 확인을 위한 디버깅
+                    all_attributes = []
+                    for attr in dir(transcript):
+                        if not attr.startswith('_'):
+                            try:
+                                value = getattr(transcript, attr)
+                                if not callable(value):
+                                    all_attributes.append(f"{attr}={value}")
+                            except:
+                                pass
+                    
                     lang_info = {
                         "language": getattr(transcript, 'language', 'unknown'),
                         "language_code": getattr(transcript, 'language_code', 'unknown'),
-                        "is_generated": getattr(transcript, 'is_generated', False)
+                        "is_generated": getattr(transcript, 'is_generated', False),
+                        "is_translatable": getattr(transcript, 'is_translatable', False),
+                        "all_attributes": all_attributes
                     }
                     available_languages.append(lang_info)
+                    
+                    # 개별 자막 상세 로그
+                    self.log_debug(f"🔍 자막 상세 정보", data={
+                        "language": lang_info["language"],
+                        "language_code": lang_info["language_code"],
+                        "is_generated": lang_info["is_generated"],
+                        "is_translatable": lang_info["is_translatable"],
+                        "all_attributes": lang_info["all_attributes"]
+                    })
                 
                 self.log_info(f"📋 사용 가능한 자막 목록", data={
                     "video_id": video_id,
+                    "total_count": len(available_languages),
                     "transcripts": available_languages
                 })
                 
@@ -175,13 +208,23 @@ class YouTubeService(LoggerMixin):
                 for transcript in transcript_list:
                     try:
                         language_code = getattr(transcript, 'language_code', 'unknown')
-                        self.log_debug(f"📥 {language_code} 자막 fetch 시도")
+                        language_name = getattr(transcript, 'language', 'unknown')
+                        is_generated = getattr(transcript, 'is_generated', False)
+                        
+                        self.log_debug(f"📥 자막 fetch 시도", data={
+                            "language_code": language_code,
+                            "language_name": language_name,
+                            "is_generated": is_generated,
+                            "is_translatable": getattr(transcript, 'is_translatable', False)
+                        })
                         
                         transcript_data = transcript.fetch()
                         text = self._format_transcript(transcript_data)
                         
                         self.log_info(f"✅ 자막 발견", data={
                             "language": language_code,
+                            "language_name": language_name,
+                            "is_generated": is_generated,
                             "items_count": len(transcript_data),
                             "text_length": len(text),
                             "first_100_chars": text[:100] if text else ""
@@ -189,20 +232,35 @@ class YouTubeService(LoggerMixin):
                         return text, language_code
                         
                     except Exception as e:
+                        import traceback
                         self.log_error(f"❌ 자막 fetch 실패", data={
+                            "language_code": language_code,
                             "error": str(e),
-                            "error_type": type(e).__name__
+                            "error_type": type(e).__name__,
+                            "traceback": traceback.format_exc()
                         })
                         continue
                 
             except Exception as e:
-                self.log_error(f"❌ 자막 목록 확인 실패", data={"error": str(e)})
+                import traceback
+                self.log_error(f"❌ 자막 목록 확인 실패", data={
+                    "video_id": video_id,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "traceback": traceback.format_exc()
+                })
             
             self.log_warning("⚠️ 자막을 찾을 수 없음", data={"video_id": video_id})
             return None, None
                 
         except Exception as e:
-            self.log_error(f"❌ 자막 추출 오류", data={"video_id": video_id, "error": str(e)})
+            import traceback
+            self.log_error(f"❌ 자막 추출 오류", data={
+                "video_id": video_id,
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "traceback": traceback.format_exc()
+            })
             return None, None
     
     def _format_transcript(self, transcript_data) -> str:

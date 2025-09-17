@@ -11,11 +11,15 @@ import asyncio
 from dotenv import load_dotenv
 
 from app.services.youtube_service import YouTubeService
+from app.services.youtube_service_ytdlp import YouTubeServiceYtDlp
 from app.services.summarizer_service import SummarizerService
 from app.services.database_service import DatabaseService
 from app.services.multi_agent_service import MultiAgentService
+from app.services.user_service import UserService
 from app.models.summary import SummaryResponse, SummarizeRequest, MultiAgentAnalyzeRequest, MultiAgentAnalyzeResponse
+from app.models.user import NicknameCheckResponse, NicknameLoginRequest, NicknameLoginResponse
 from app.utils.logger import setup_logger, log_function_call
+from app.utils.oauth_manager import YtDlpOAuthManager
 
 # 환경 변수 로드
 load_dotenv()
@@ -33,7 +37,12 @@ app = FastAPI(
 logger.info("✅ FastAPI 앱 초기화 완료")
 
 # CORS 설정 - 프론트엔드와의 통신을 위해 필요
-cors_origins = [os.getenv("FRONTEND_URL", "http://localhost:3000")]
+# Tailscale IP 추가
+cors_origins = [
+    os.getenv("FRONTEND_URL", "http://localhost:3000"),
+    "http://100.118.223.116:3000",  # Tailscale IP for Android app
+    "http://100.118.223.116:8081",  # React Native dev server
+]
 logger.info(f"📡 CORS 설정 시작", extra={"data": {"allowed_origins": cors_origins}})
 app.add_middleware(
     CORSMiddleware,
@@ -46,8 +55,20 @@ logger.info("✅ CORS 설정 완료")
 
 # 서비스 초기화
 logger.info("🔧 서비스 초기화 시작")
-youtube_service = YouTubeService()
+
+# OAuth2 매니저 초기화
+oauth_manager = YtDlpOAuthManager()
+
+# YouTube 서비스 선택 (OAuth2 사용 가능하면 yt-dlp 사용)
+if oauth_manager.is_authenticated():
+    logger.info("🔐 OAuth2 인증됨 - yt-dlp 서비스 사용")
+    youtube_service = YouTubeServiceYtDlp()
+else:
+    logger.warning("⚠️ OAuth2 미인증 - 기본 서비스 사용 (멤버십 영상 불가)")
+    youtube_service = YouTubeService()
+
 summarizer_service = SummarizerService()
+user_service = UserService()
 
 # 멀티에이전트 서비스 초기화
 try:
@@ -74,13 +95,55 @@ logger.info("✅ 서비스 초기화 완료")
 async def root():
     """API 루트 엔드포인트"""
     logger.info("📍 루트 엔드포인트 호출")
+
+    # OAuth2 상태 포함
+    oauth_status = oauth_manager.get_status_summary()
+
     response = {
-        "message": "YouTube Summarizer API", 
+        "message": "YouTube Summarizer API",
         "version": "1.0.0",
-        "docs": "/docs"
+        "docs": "/docs",
+        "oauth_status": oauth_status["authenticated"],
+        "service_type": "yt-dlp" if oauth_status["authenticated"] else "youtube-transcript-api",
+        "tailscale_ip": "100.118.223.116"
     }
     logger.debug("📤 루트 응답", extra={"data": response})
     return response
+
+
+@app.get("/api/auth/oauth2/status")
+async def get_oauth2_status():
+    """OAuth2 인증 상태 확인"""
+    logger.info("🔐 OAuth2 상태 확인 요청")
+
+    try:
+        status = oauth_manager.get_status_summary()
+        logger.info(f"✅ OAuth2 상태 조회 성공", extra={"data": status})
+        return status
+    except Exception as e:
+        logger.error(f"❌ OAuth2 상태 조회 실패", extra={"data": {"error": str(e)}})
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/auth/oauth2/check")
+async def check_oauth2_setup():
+    """OAuth2 설정 확인 및 안내"""
+    logger.info("🔐 OAuth2 설정 확인 요청")
+
+    if oauth_manager.is_authenticated():
+        return {
+            "status": "authenticated",
+            "message": "OAuth2 인증이 완료되었습니다.",
+            "can_access_membership": True
+        }
+    else:
+        return {
+            "status": "not_authenticated",
+            "message": "OAuth2 인증이 필요합니다. Windows PC에서 다음 명령을 실행하세요:",
+            "setup_command": "yt-dlp --username oauth2 --password \"\" --verbose",
+            "setup_url": "https://www.google.com/device",
+            "can_access_membership": False
+        }
 
 
 @app.post("/api/summarize", response_model=MultiAgentAnalyzeResponse)
@@ -214,6 +277,82 @@ async def summarize_video(request: SummarizeRequest):
         )
 
 
+
+@app.get("/api/auth/check/{nickname}")
+async def check_nickname(nickname: str):
+    """
+    닉네임 중복 확인 (대소문자 무시)
+    
+    Args:
+        nickname: 확인할 닉네임
+    
+    Returns:
+        중복 여부와 메시지
+    """
+    logger.info(f"📥 닉네임 중복 확인 요청: {nickname}")
+    
+    try:
+        result = await user_service.check_nickname(nickname)
+        logger.info(f"✅ 닉네임 확인 완료", extra={"data": result})
+        return result
+    except Exception as e:
+        logger.error(f"❌ 닉네임 확인 실패", extra={"data": {"error": str(e)}})
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/auth/nickname", response_model=NicknameLoginResponse)
+async def login_with_nickname(request: NicknameLoginRequest):
+    """
+    닉네임으로 로그인 또는 등록
+    
+    Args:
+        request: 닉네임 정보
+    
+    Returns:
+        사용자 정보와 신규 여부
+    """
+    logger.info(f"📥 닉네임 로그인/등록 요청", extra={"data": {"nickname": request.nickname}})
+    
+    try:
+        result = await user_service.login_or_register(request.nickname)
+        logger.info(f"✅ 로그인/등록 성공", extra={"data": {
+            "id": result["id"],
+            "nickname": result["nickname"],
+            "isNew": result["isNew"]
+        }})
+        return NicknameLoginResponse(**result)
+    except Exception as e:
+        logger.error(f"❌ 로그인/등록 실패", extra={"data": {"error": str(e)}})
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/reports/user/{user_id}")
+async def get_user_reports(user_id: str):
+    """
+    사용자별 분석 보고서 목록 조회
+    
+    Args:
+        user_id: 사용자 ID
+    
+    Returns:
+        사용자의 분석 보고서 목록
+    """
+    logger.info(f"📥 사용자 보고서 목록 조회 요청", extra={"data": {"user_id": user_id}})
+    
+    try:
+        # TODO: 데이터베이스에서 사용자별 보고서 조회 구현
+        # 현재는 빈 목록 반환
+        reports = []
+        
+        logger.info(f"✅ 보고서 목록 조회 완료", extra={"data": {
+            "user_id": user_id,
+            "count": len(reports)
+        }})
+        
+        return {"reports": reports}
+    except Exception as e:
+        logger.error(f"❌ 보고서 목록 조회 실패", extra={"data": {"error": str(e)}})
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/health")

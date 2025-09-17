@@ -7,9 +7,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 
-# ================================
 # 에이전트 간 전달되는 데이터 모델
-# ================================
 
 class TranscriptRefinementInput(BaseModel):
     """자막 정제 에이전트 입력 데이터"""
