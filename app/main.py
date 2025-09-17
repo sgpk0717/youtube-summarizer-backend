@@ -19,7 +19,6 @@ from app.services.user_service import UserService
 from app.models.summary import SummaryResponse, SummarizeRequest, MultiAgentAnalyzeRequest, MultiAgentAnalyzeResponse
 from app.models.user import NicknameCheckResponse, NicknameLoginRequest, NicknameLoginResponse
 from app.utils.logger import setup_logger, log_function_call
-from app.utils.oauth_manager import YtDlpOAuthManager
 
 # 환경 변수 로드
 load_dotenv()
@@ -56,15 +55,13 @@ logger.info("✅ CORS 설정 완료")
 # 서비스 초기화
 logger.info("🔧 서비스 초기화 시작")
 
-# OAuth2 매니저 초기화
-oauth_manager = YtDlpOAuthManager()
-
-# YouTube 서비스 선택 (OAuth2 사용 가능하면 yt-dlp 사용)
-if oauth_manager.is_authenticated():
-    logger.info("🔐 OAuth2 인증됨 - yt-dlp 서비스 사용")
+# YouTube 서비스 선택
+# 멤버십 영상을 위해 yt-dlp 서비스 사용 시도
+try:
     youtube_service = YouTubeServiceYtDlp()
-else:
-    logger.warning("⚠️ OAuth2 미인증 - 기본 서비스 사용 (멤버십 영상 불가)")
+    logger.info("🍪 yt-dlp 서비스 초기화 (쿠키 인증)")
+except Exception as e:
+    logger.warning(f"⚠️ yt-dlp 서비스 초기화 실패, 기본 서비스 사용: {e}")
     youtube_service = YouTubeService()
 
 summarizer_service = SummarizerService()
@@ -96,54 +93,50 @@ async def root():
     """API 루트 엔드포인트"""
     logger.info("📍 루트 엔드포인트 호출")
 
-    # OAuth2 상태 포함
-    oauth_status = oauth_manager.get_status_summary()
+    # 서비스 타입 확인
+    service_type = "yt-dlp (cookie)" if isinstance(youtube_service, YouTubeServiceYtDlp) else "youtube-transcript-api"
 
     response = {
         "message": "YouTube Summarizer API",
         "version": "1.0.0",
         "docs": "/docs",
-        "oauth_status": oauth_status["authenticated"],
-        "service_type": "yt-dlp" if oauth_status["authenticated"] else "youtube-transcript-api",
+        "service_type": service_type,
+        "cookie_auth": isinstance(youtube_service, YouTubeServiceYtDlp),
         "tailscale_ip": "100.118.223.116"
     }
     logger.debug("📤 루트 응답", extra={"data": response})
     return response
 
 
-@app.get("/api/auth/oauth2/status")
-async def get_oauth2_status():
-    """OAuth2 인증 상태 확인"""
-    logger.info("🔐 OAuth2 상태 확인 요청")
+@app.get("/api/auth/cookie/status")
+async def get_cookie_status():
+    """쿠키 인증 상태 확인"""
+    logger.info("🍪 쿠키 상태 확인 요청")
 
     try:
-        status = oauth_manager.get_status_summary()
-        logger.info(f"✅ OAuth2 상태 조회 성공", extra={"data": status})
-        return status
+        if isinstance(youtube_service, YouTubeServiceYtDlp):
+            cookie_method = youtube_service._get_cookie_method_name()
+            return {
+                "status": "active",
+                "method": cookie_method,
+                "message": "쿠키 인증 활성화됨",
+                "can_access_membership": True,
+                "tips": [
+                    "Chrome이 완전히 종료되어 있어야 합니다",
+                    "Chrome 바로가기에 --disable-features=LockProfileCookieDatabase 추가하면 편합니다",
+                    "YouTube에 로그인되어 있어야 합니다"
+                ]
+            }
+        else:
+            return {
+                "status": "inactive",
+                "method": "none",
+                "message": "기본 서비스 사용 중 (멤버십 영상 불가)",
+                "can_access_membership": False
+            }
     except Exception as e:
-        logger.error(f"❌ OAuth2 상태 조회 실패", extra={"data": {"error": str(e)}})
+        logger.error(f"❌ 쿠키 상태 조회 실패", extra={"data": {"error": str(e)}})
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/auth/oauth2/check")
-async def check_oauth2_setup():
-    """OAuth2 설정 확인 및 안내"""
-    logger.info("🔐 OAuth2 설정 확인 요청")
-
-    if oauth_manager.is_authenticated():
-        return {
-            "status": "authenticated",
-            "message": "OAuth2 인증이 완료되었습니다.",
-            "can_access_membership": True
-        }
-    else:
-        return {
-            "status": "not_authenticated",
-            "message": "OAuth2 인증이 필요합니다. Windows PC에서 다음 명령을 실행하세요:",
-            "setup_command": "yt-dlp --username oauth2 --password \"\" --verbose",
-            "setup_url": "https://www.google.com/device",
-            "can_access_membership": False
-        }
 
 
 @app.post("/api/summarize", response_model=MultiAgentAnalyzeResponse)

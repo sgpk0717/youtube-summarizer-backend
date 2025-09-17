@@ -13,26 +13,28 @@ echo.
 REM 스크립트 디렉토리에서 프로젝트 루트로 이동
 cd /d "%~dp0\.."
 
-REM OAuth2 인증 상태 확인
-echo [1/4] OAuth2 인증 상태 확인 중...
-python scripts\check_oauth_status.py
-if errorlevel 1 (
+REM Chrome 상태 확인
+echo [1/4] Chrome 브라우저 상태 확인 중...
+tasklist /FI "IMAGENAME eq chrome.exe" 2>nul | find /I /N "chrome.exe">nul
+if "%ERRORLEVEL%"=="0" (
     echo.
     echo ╔═══════════════════════════════════════════════════════════╗
-    echo ║           ⚠️  OAuth2 인증이 필요합니다!                   ║
+    echo ║           ⚠️  Chrome이 실행 중입니다!                      ║
     echo ╠═══════════════════════════════════════════════════════════╣
-    echo ║  멤버십 영상 접근을 위해 OAuth2 인증이 필요합니다.        ║
+    echo ║  멤버십 영상 접근을 위해서는:                             ║
     echo ║                                                            ║
-    echo ║  다음 명령을 실행하여 인증을 완료하세요:                  ║
-    echo ║  scripts\windows_oauth_setup.bat                          ║
+    echo ║  옵션 1: Chrome을 완전히 종료하세요                       ║
+    echo ║  옵션 2: Chrome 바로가기에 다음 플래그 추가:              ║
+    echo ║          --disable-features=LockProfileCookieDatabase     ║
+    echo ║  옵션 3: cookies.txt 파일 사용 (있는 경우)                ║
     echo ║                                                            ║
-    echo ║  인증 없이 계속하면 일반 영상만 처리 가능합니다.          ║
+    echo ║  일반 영상은 그대로 처리 가능합니다.                      ║
     echo ╚═══════════════════════════════════════════════════════════╝
     echo.
-    echo 인증 없이 계속하시겠습니까? (Y/N)
+    echo 계속하시겠습니까? (Y/N)
     choice /C YN /N
     if errorlevel 2 (
-        echo 서버 시작을 취소합니다.
+        echo Chrome을 종료한 후 다시 실행하세요.
         pause
         exit /b 1
     )
@@ -93,7 +95,7 @@ if defined TAILSCALE_IP (
     echo   - Tailscale: http://%TAILSCALE_IP%:8000
 )
 echo   - API 문서: http://localhost:8000/docs
-echo   - OAuth2 상태: http://localhost:8000/api/auth/oauth2/status
+echo   - 쿠키 상태: http://localhost:8000/api/auth/cookie/status
 echo.
 echo 종료하려면 Ctrl+C를 누르세요.
 echo ========================================

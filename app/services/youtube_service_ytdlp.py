@@ -1,28 +1,55 @@
 """
-YouTube 서비스 모듈 (yt-dlp OAuth2 버전)
+YouTube 서비스 모듈 (yt-dlp 쿠키 버전)
 멤버십 영상 자막 추출 지원
 """
 
 import yt_dlp
 import re
 import json
+import platform
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 from app.models.summary import VideoData
 from app.utils.logger import LoggerMixin
-from app.utils.oauth_manager import YtDlpOAuthManager
 
 
 class YouTubeServiceYtDlp(LoggerMixin):
-    """yt-dlp를 사용한 YouTube 서비스 클래스 (OAuth2 지원)"""
+    """yt-dlp를 사용한 YouTube 서비스 클래스 (쿠키 인증)"""
 
     def __init__(self):
         """서비스 초기화"""
-        self.oauth_manager = YtDlpOAuthManager()
+        self.cookie_method = self._determine_cookie_method()
+        self.log_info("🚀 YouTube Service (yt-dlp) 초기화", data={
+            "platform": platform.system(),
+            "cookie_method": self._get_cookie_method_name()
+        })
 
-        # OAuth2 상태 확인
-        auth_status = self.oauth_manager.get_status_summary()
-        self.log_info("🚀 YouTube Service (yt-dlp) 초기화", data=auth_status)
+    def _determine_cookie_method(self) -> Dict:
+        """최적의 쿠키 방법 결정"""
+        # 1. 쿠키 파일이 있으면 우선 사용
+        cookie_file = Path("cookies.txt")
+        if cookie_file.exists():
+            self.log_info("📁 쿠키 파일 발견, 파일 사용")
+            return {"cookiefile": str(cookie_file)}
+
+        # 2. Windows: Chrome 브라우저에서 직접 읽기
+        # 주의: Chrome이 완전히 종료되어 있어야 함!
+        if platform.system() == "Windows":
+            self.log_info("🌐 Windows 환경, Chrome 브라우저에서 쿠키 읽기")
+            return {"cookiesfrombrowser": ("chrome", None)}
+
+        # 3. 기타 OS: Chrome 사용
+        self.log_info("🌐 Chrome 브라우저에서 쿠키 읽기")
+        return {"cookiesfrombrowser": ("chrome", None)}
+
+    def _get_cookie_method_name(self) -> str:
+        """쿠키 방법 이름 반환 (로깅용)"""
+        if "cookiefile" in self.cookie_method:
+            return f"cookie_file ({self.cookie_method['cookiefile']})"
+        elif "cookiesfrombrowser" in self.cookie_method:
+            browser = self.cookie_method["cookiesfrombrowser"][0]
+            return f"browser ({browser})"
+        return "unknown"
 
     def extract_video_id(self, url: str) -> str:
         """
@@ -57,7 +84,7 @@ class YouTubeServiceYtDlp(LoggerMixin):
 
     async def get_video_data(self, url: str) -> VideoData:
         """
-        비디오 정보와 자막을 가져옵니다 (OAuth2 사용)
+        비디오 정보와 자막을 가져옵니다 (쿠키 사용)
 
         Args:
             url: 유튜브 영상 URL
@@ -67,13 +94,12 @@ class YouTubeServiceYtDlp(LoggerMixin):
         """
         self.log_info(f"📥 비디오 데이터 추출 시작", data={"url": url})
 
-        # OAuth2 인증 확인
-        if not self.oauth_manager.is_authenticated():
-            self.log_error("❌ OAuth2 인증 필요")
-            raise Exception("OAuth2 인증이 필요합니다. Windows PC에서 인증을 완료하세요.")
-
         # yt-dlp 옵션 설정
-        ydl_opts = self.oauth_manager.get_ydl_opts({
+        ydl_opts = {
+            **self.cookie_method,  # 쿠키 설정 적용
+
+            # User-Agent 설정 (중요! 봇 감지 방지)
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             # 자막 옵션
             'writesubtitles': True,
             'writeautomaticsub': True,
@@ -96,7 +122,11 @@ class YouTubeServiceYtDlp(LoggerMixin):
 
             # 진행 상황 후킹
             'progress_hooks': [self._progress_hook],
-        })
+
+            # 속도 제한 (봇 감지 방지)
+            'sleep_interval': 3,  # 다운로드 전 3초 대기
+            'max_sleep_interval': 10,  # 최대 10초
+        }
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
