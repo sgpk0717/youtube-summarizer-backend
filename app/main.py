@@ -242,7 +242,7 @@ async def summarize_video(request: SummarizeRequest):
         )
         
         # 5. DB에 저장 (백그라운드) - 멀티에이전트 결과용
-        if db_service and hasattr(request, 'user_id') and request.user_id:
+        if db_service and request.user_id:  # SummarizeRequest에 user_id 필드가 있음
             try:
                 # 멀티에이전트 결과를 DB에 저장
                 report_id = await db_service.save_multi_agent_report(
