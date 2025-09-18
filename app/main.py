@@ -251,11 +251,11 @@ async def summarize_video(request: SummarizeRequest):
                     title=video_data.title,
                     channel=video_data.channel,
                     agent_results={
-                        "summary": multi_agent_result.summary_agent,
-                        "structure": multi_agent_result.structure_agent,
-                        "insights": multi_agent_result.insights_agent,
-                        "practical": multi_agent_result.practical_agent,
-                        "synthesis": multi_agent_result.synthesis_agent
+                        "transcript_refinement": multi_agent_result.transcript_refinement,
+                        "speaker_diarization": multi_agent_result.speaker_diarization,
+                        "topic_cohesion": multi_agent_result.topic_cohesion,
+                        "structure_design": multi_agent_result.structure_design,
+                        "report_synthesis": multi_agent_result.report_synthesis
                     },
                     processing_status={
                         "status": multi_agent_result.processing_status.status,

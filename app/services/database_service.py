@@ -303,7 +303,7 @@ class DatabaseService(LoggerMixin):
             agent_records = []
 
             # 각 에이전트 결과 저장
-            for agent_type in ['summary', 'structure', 'insights', 'practical', 'synthesis']:
+            for agent_type in ['transcript_refinement', 'speaker_diarization', 'topic_cohesion', 'structure_design', 'report_synthesis']:
                 agent_data = agent_results.get(agent_type, {})
 
                 if agent_data and agent_data.get("success"):
