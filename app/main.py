@@ -241,8 +241,39 @@ async def summarize_video(request: SummarizeRequest):
         )
         
         # 5. DB에 저장 (백그라운드) - 멀티에이전트 결과용
-        # TODO: 멀티에이전트 결과 저장 로직 구현
-        
+        if db_service and hasattr(request, 'user_id') and request.user_id:
+            try:
+                # 멀티에이전트 결과를 DB에 저장
+                report_id = await db_service.save_multi_agent_report(
+                    user_id=request.user_id,
+                    video_id=video_data.video_id,
+                    title=video_data.title,
+                    channel=video_data.channel,
+                    agent_results={
+                        "summary": multi_agent_result.summary_agent,
+                        "structure": multi_agent_result.structure_agent,
+                        "insights": multi_agent_result.insights_agent,
+                        "practical": multi_agent_result.practical_agent,
+                        "synthesis": multi_agent_result.synthesis_agent
+                    },
+                    processing_status={
+                        "status": multi_agent_result.processing_status.status,
+                        "total_processing_time": multi_agent_result.processing_status.total_processing_time,
+                        "successful_agents": multi_agent_result.successful_agents,
+                        "total_agents": multi_agent_result.total_agents
+                    }
+                )
+
+                if report_id:
+                    logger.info(f"✅ 멀티에이전트 결과 DB 저장 완료", extra={"data": {
+                        "report_id": report_id,
+                        "video_id": video_data.video_id
+                    }})
+                else:
+                    logger.warning("⚠️ 멀티에이전트 결과 DB 저장 실패")
+            except Exception as e:
+                logger.error(f"❌ DB 저장 중 오류", extra={"data": {"error": str(e)}})
+
         logger.info(f"✅ 고급 분석 완료: {video_data.video_id}", extra={"data": {
             "processing_time": f"{processing_time:.2f}초",
             "status": multi_agent_result.processing_status.status,
@@ -319,30 +350,71 @@ async def login_with_nickname(request: NicknameLoginRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/reports/{report_id}")
+async def get_report_detail(report_id: str):
+    """
+    보고서 상세 조회 (에이전트 결과 포함)
+
+    Args:
+        report_id: 보고서 ID
+
+    Returns:
+        보고서 상세 정보와 에이전트별 결과
+    """
+    logger.info(f"📥 보고서 상세 조회 요청", extra={"data": {"report_id": report_id}})
+
+    try:
+        if db_service:
+            # 데이터베이스에서 보고서와 에이전트 결과 조회
+            report = await db_service.get_report_with_agents(report_id=report_id)
+
+            if report:
+                logger.info(f"✅ 보고서 상세 조회 완료", extra={"data": {
+                    "report_id": report_id,
+                    "video_id": report.get("video_id"),
+                    "agent_count": len(report.get("agent_results", {}))
+                }})
+                return report
+            else:
+                logger.warning(f"⚠️ 보고서 없음: {report_id}")
+                raise HTTPException(status_code=404, detail="보고서를 찾을 수 없습니다")
+        else:
+            logger.warning("⚠️ 데이터베이스 서비스 사용 불가")
+            raise HTTPException(status_code=503, detail="데이터베이스 서비스를 사용할 수 없습니다")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 보고서 상세 조회 실패", extra={"data": {"error": str(e)}})
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/reports/user/{user_id}")
 async def get_user_reports(user_id: str):
     """
     사용자별 분석 보고서 목록 조회
-    
+
     Args:
         user_id: 사용자 ID
-    
+
     Returns:
         사용자의 분석 보고서 목록
     """
     logger.info(f"📥 사용자 보고서 목록 조회 요청", extra={"data": {"user_id": user_id}})
-    
+
     try:
-        # TODO: 데이터베이스에서 사용자별 보고서 조회 구현
-        # 현재는 빈 목록 반환
-        reports = []
-        
-        logger.info(f"✅ 보고서 목록 조회 완료", extra={"data": {
-            "user_id": user_id,
-            "count": len(reports)
-        }})
-        
-        return {"reports": reports}
+        if db_service:
+            # 데이터베이스에서 사용자별 보고서 조회
+            reports = await db_service.get_user_reports(user_id=user_id, limit=20)
+
+            logger.info(f"✅ 보고서 목록 조회 완료", extra={"data": {
+                "user_id": user_id,
+                "count": len(reports)
+            }})
+
+            return {"reports": reports}
+        else:
+            logger.warning("⚠️ 데이터베이스 서비스 사용 불가")
+            return {"reports": []}
     except Exception as e:
         logger.error(f"❌ 보고서 목록 조회 실패", extra={"data": {"error": str(e)}})
         raise HTTPException(status_code=500, detail=str(e))

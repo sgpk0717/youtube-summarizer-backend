@@ -70,25 +70,25 @@ class DatabaseService(LoggerMixin):
             return None
     
     async def save_video(
-        self, 
+        self,
         video_data: VideoData,
         summary: Summary,
         transcript_array: List[Dict[str, Any]]
     ) -> bool:
         """
         비디오 정보와 자막을 데이터베이스에 저장
-        
+
         Args:
             video_data: 비디오 메타데이터
             summary: 요약 정보
             transcript_array: 타임스탬프별 자막 배열
-            
+
         Returns:
             저장 성공 여부
         """
         try:
             self.log_info(f"💾 비디오 저장 시작: {video_data.video_id}")
-            
+
             # 저장할 데이터 준비
             data = {
                 "video_id": video_data.video_id,
@@ -103,13 +103,13 @@ class DatabaseService(LoggerMixin):
                 "summary_key_points": summary.key_points,
                 "summary_detailed": summary.detailed,
             }
-            
+
             # 로깅 (전문)
             self.log_debug(f"📤 저장할 데이터", data=data)
-            
+
             # 기존 데이터 확인
             existing = await self.get_video(video_data.video_id)
-            
+
             if existing:
                 # 업데이트
                 self.log_info(f"🔄 기존 데이터 업데이트: {video_data.video_id}")
@@ -123,7 +123,7 @@ class DatabaseService(LoggerMixin):
                 response = self.client.table("videos")\
                     .insert(data)\
                     .execute()
-            
+
             if response.data:
                 self.log_info(f"✅ 비디오 저장 성공", data={
                     "video_id": video_data.video_id,
@@ -136,7 +136,7 @@ class DatabaseService(LoggerMixin):
                     "video_id": video_data.video_id
                 })
                 return False
-                
+
         except Exception as e:
             self.log_error(f"❌ 비디오 저장 실패", data={
                 "video_id": video_data.video_id,
@@ -212,22 +212,22 @@ class DatabaseService(LoggerMixin):
     async def get_popular_videos(self, limit: int = 10) -> List[Dict[str, Any]]:
         """
         인기 비디오 조회 (조회수 기준)
-        
+
         Args:
             limit: 결과 제한 수
-            
+
         Returns:
             인기 비디오 리스트
         """
         try:
             self.log_info(f"🌟 인기 비디오 조회 시작")
-            
+
             response = self.client.table("videos")\
                 .select("video_id, title, channel_name, language_code, access_count, created_at")\
                 .order("access_count", desc=True)\
                 .limit(limit)\
                 .execute()
-            
+
             if response.data:
                 self.log_info(f"✅ 인기 비디오 조회 성공", data={
                     "count": len(response.data)
@@ -235,9 +235,222 @@ class DatabaseService(LoggerMixin):
                 return response.data
             else:
                 return []
-                
+
         except Exception as e:
             self.log_error(f"❌ 인기 비디오 조회 실패", data={
                 "error": str(e)
             })
             return []
+
+    async def save_multi_agent_report(
+        self,
+        user_id: str,
+        video_id: str,
+        title: str,
+        channel: str,
+        agent_results: Dict[str, Any],
+        processing_status: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        멀티에이전트 분석 보고서 저장
+
+        Args:
+            user_id: 사용자 ID
+            video_id: YouTube 비디오 ID
+            title: 비디오 제목
+            channel: 채널명
+            agent_results: 에이전트별 분석 결과
+            processing_status: 처리 상태 정보
+
+        Returns:
+            저장된 보고서 ID 또는 None
+        """
+        try:
+            self.log_info(f"🤖 멀티에이전트 보고서 저장 시작", data={
+                "user_id": user_id,
+                "video_id": video_id,
+                "title": title
+            })
+
+            # 1. reports 테이블에 메인 레코드 저장
+            report_data = {
+                "user_id": user_id,
+                "video_id": video_id,
+                "title": title,
+                "channel_name": channel,
+                "analysis_type": "multi_agent",
+                "status": processing_status.get("status", "completed"),
+                "processing_time": processing_status.get("total_processing_time"),
+                "successful_agents": processing_status.get("successful_agents", 0),
+                "total_agents": processing_status.get("total_agents", 5)
+            }
+
+            self.log_debug(f"📤 저장할 보고서 데이터", data=report_data)
+
+            # 보고서 삽입
+            report_response = self.client.table("reports")\
+                .insert(report_data)\
+                .execute()
+
+            if not report_response.data or len(report_response.data) == 0:
+                self.log_error("❌ 보고서 저장 실패 - 응답 없음")
+                return None
+
+            report_id = report_response.data[0]["id"]
+            self.log_info(f"✅ 보고서 메인 레코드 저장 완료", data={"report_id": report_id})
+
+            # 2. agent_results 테이블에 각 에이전트 결과 저장
+            agent_records = []
+
+            # 각 에이전트 결과 저장
+            for agent_type in ['summary', 'structure', 'insights', 'practical', 'synthesis']:
+                agent_data = agent_results.get(agent_type, {})
+
+                if agent_data and agent_data.get("success"):
+                    agent_record = {
+                        "report_id": report_id,
+                        "agent_type": agent_type,
+                        "result_data": agent_data.get("result", {}),
+                        "processing_time": agent_data.get("processing_time", 0),
+                        "success": True
+                    }
+                    agent_records.append(agent_record)
+                    self.log_debug(f"📊 {agent_type} 에이전트 결과 준비", data={
+                        "success": True,
+                        "has_data": bool(agent_data.get("result"))
+                    })
+
+            # 에이전트 결과들 한번에 삽입
+            if agent_records:
+                self.log_info(f"📤 {len(agent_records)}개 에이전트 결과 저장 시작")
+
+                agent_response = self.client.table("agent_results")\
+                    .insert(agent_records)\
+                    .execute()
+
+                if agent_response.data:
+                    self.log_info(f"✅ 에이전트 결과 저장 성공", data={
+                        "report_id": report_id,
+                        "agent_count": len(agent_records)
+                    })
+                else:
+                    self.log_warning("⚠️ 에이전트 결과 저장 실패 - 보고서는 저장됨")
+            else:
+                self.log_warning("⚠️ 저장할 에이전트 결과 없음")
+
+            return report_id
+
+        except Exception as e:
+            self.log_error(f"❌ 멀티에이전트 보고서 저장 실패", data={
+                "user_id": user_id,
+                "video_id": video_id,
+                "error": str(e),
+                "error_type": type(e).__name__
+            })
+            return None
+
+    async def get_user_reports(
+        self,
+        user_id: str,
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        사용자별 분석 보고서 목록 조회
+
+        Args:
+            user_id: 사용자 ID
+            limit: 결과 제한 수
+
+        Returns:
+            보고서 목록
+        """
+        try:
+            self.log_info(f"📚 사용자 보고서 목록 조회", data={
+                "user_id": user_id,
+                "limit": limit
+            })
+
+            response = self.client.table("reports")\
+                .select("*")\
+                .eq("user_id", user_id)\
+                .order("created_at", desc=True)\
+                .limit(limit)\
+                .execute()
+
+            if response.data:
+                self.log_info(f"✅ 보고서 목록 조회 성공", data={
+                    "user_id": user_id,
+                    "count": len(response.data)
+                })
+                return response.data
+            else:
+                self.log_info("ℹ️ 보고서 없음")
+                return []
+
+        except Exception as e:
+            self.log_error(f"❌ 보고서 목록 조회 실패", data={
+                "user_id": user_id,
+                "error": str(e)
+            })
+            return []
+
+    async def get_report_with_agents(
+        self,
+        report_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        보고서와 에이전트 결과 상세 조회
+
+        Args:
+            report_id: 보고서 ID
+
+        Returns:
+            보고서 상세 정보 (에이전트 결과 포함)
+        """
+        try:
+            self.log_info(f"📖 보고서 상세 조회", data={"report_id": report_id})
+
+            # 보고서 메인 정보 조회
+            report_response = self.client.table("reports")\
+                .select("*")\
+                .eq("id", report_id)\
+                .execute()
+
+            if not report_response.data or len(report_response.data) == 0:
+                self.log_warning(f"⚠️ 보고서 없음: {report_id}")
+                return None
+
+            report = report_response.data[0]
+
+            # 에이전트 결과 조회
+            agent_response = self.client.table("agent_results")\
+                .select("*")\
+                .eq("report_id", report_id)\
+                .execute()
+
+            # 에이전트 결과를 딕셔너리로 변환
+            agent_results = {}
+            if agent_response.data:
+                for agent in agent_response.data:
+                    agent_results[agent["agent_type"]] = {
+                        "success": agent["success"],
+                        "result": agent["result_data"],
+                        "processing_time": agent["processing_time"]
+                    }
+
+            # 보고서에 에이전트 결과 추가
+            report["agent_results"] = agent_results
+
+            self.log_info(f"✅ 보고서 상세 조회 성공", data={
+                "report_id": report_id,
+                "agent_count": len(agent_results)
+            })
+
+            return report
+
+        except Exception as e:
+            self.log_error(f"❌ 보고서 상세 조회 실패", data={
+                "report_id": report_id,
+                "error": str(e)
+            })
+            return None
