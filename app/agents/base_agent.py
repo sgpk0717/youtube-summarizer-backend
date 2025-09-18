@@ -184,14 +184,24 @@ class BaseAgent(LoggerMixin, ABC):
             "model": self.model
         })
         
-        # GPT-5 API 호출 (CLAUDE.md 형식)
+        # 모델에 따른 API 호출 분기
         full_prompt = f"{system_prompt}\n\n{user_prompt}"
-        response = self.openai_client.responses.create(
-            model=self.model,  # gpt-5
-            input=full_prompt,
-            reasoning={"effort": "medium"},  # 중간 수준의 추론
-            text={"verbosity": "medium"}  # 중간 수준의 상세도
-        )
+
+        if self.model == "gpt-5":
+            # GPT-5 API 호출 (CLAUDE.md 형식)
+            response = self.openai_client.responses.create(
+                model=self.model,
+                input=full_prompt,
+                reasoning={"effort": "medium"},  # 중간 수준의 추론
+                text={"verbosity": "medium"}  # 중간 수준의 상세도
+            )
+        else:
+            # 다른 모델들은 reasoning 파라미터 제거
+            response = self.openai_client.responses.create(
+                model=self.model,
+                input=full_prompt,
+                text={"verbosity": "medium"}  # 상세도만 유지
+            )
 
         response_text = response.output_text
         
