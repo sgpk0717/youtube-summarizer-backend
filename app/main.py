@@ -355,5 +355,33 @@ async def health_check():
     return {"status": "healthy", "service": "youtube-summarizer"}
 
 
+@app.get("/api/cookies/status")
+async def cookie_status():
+    """쿠키 상태 확인 엔드포인트"""
+    from app.services.cookie_refresher import get_cookie_refresher
+
+    cookie_refresher = get_cookie_refresher()
+    status = cookie_refresher.get_status()
+
+    logger.info("🍪 쿠키 상태 조회", extra={"data": status})
+    return status
+
+
+@app.post("/api/cookies/refresh")
+async def refresh_cookies():
+    """수동 쿠키 갱신 엔드포인트"""
+    from app.services.cookie_refresher import get_cookie_refresher
+
+    cookie_refresher = get_cookie_refresher()
+    success = cookie_refresher.refresh_cookies()
+
+    if success:
+        logger.info("✅ 쿠키 수동 갱신 성공")
+        return {"status": "success", "message": "쿠키가 갱신되었습니다"}
+    else:
+        logger.error("❌ 쿠키 수동 갱신 실패")
+        raise HTTPException(status_code=500, detail="쿠키 갱신 실패")
+
+
 # Swagger UI는 /docs에서 자동으로 제공됨
 # ReDoc은 /redoc에서 자동으로 제공됨

@@ -38,7 +38,7 @@ class BaseAgent(LoggerMixin, ABC):
             raise ValueError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
         
         self.openai_client = OpenAI(api_key=api_key)
-        self.model = "gpt-4o-mini"  # 실제 사용 가능한 모델
+        self.model = "gpt-5"  # GPT-5 모델 사용
         
         self.log_info(f"🤖 {self.agent_name} 에이전트 초기화 완료", data={
             "agent_name": self.agent_name,
@@ -183,18 +183,16 @@ class BaseAgent(LoggerMixin, ABC):
             "model": self.model
         })
         
-        # OpenAI API 호출
-        response = self.openai_client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.3,  # 일관성을 위해 낮은 temperature
-            max_tokens=4000   # 충분한 출력 길이 확보
+        # GPT-5 API 호출 (CLAUDE.md 형식)
+        full_prompt = f"{system_prompt}\n\n{user_prompt}"
+        response = self.openai_client.responses.create(
+            model=self.model,  # gpt-5
+            input=full_prompt,
+            reasoning={"effort": "medium"},  # 중간 수준의 추론
+            text={"verbosity": "medium"}  # 중간 수준의 상세도
         )
-        
-        response_text = response.choices[0].message.content
+
+        response_text = response.output_text
         
         self.log_debug(f"📥 {self.agent_name} API 응답 수신", data={
             "response_length": len(response_text)

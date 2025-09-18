@@ -27,7 +27,7 @@ class YouTubeServiceYtDlp(LoggerMixin):
     def _determine_cookie_method(self) -> Dict:
         """최적의 쿠키 방법 결정"""
         # 1. 쿠키 파일이 있으면 우선 사용
-        cookie_file = Path("cookies.txt")
+        cookie_file = Path("www.youtube.com_cookies.txt")
         if cookie_file.exists():
             self.log_info("📁 쿠키 파일 발견, 파일 사용")
             return {"cookiefile": str(cookie_file)}
@@ -93,6 +93,17 @@ class YouTubeServiceYtDlp(LoggerMixin):
             VideoData: 비디오 정보와 자막이 포함된 객체
         """
         self.log_info(f"📥 비디오 데이터 추출 시작", data={"url": url})
+
+        # 쿠키 갱신 체크 (10분 이상 경과 시 자동 갱신)
+        from app.services.cookie_refresher import get_cookie_refresher
+        cookie_refresher = get_cookie_refresher()
+
+        # 조건부 쿠키 갱신 (10분 이상 경과 시)
+        await cookie_refresher.ensure_fresh_cookies()
+
+        # 갱신 후 쿠키 방법 재결정
+        self.cookie_method = self._determine_cookie_method()
+        self.log_info(f"🍪 쿠키 상태", data=cookie_refresher.get_status())
 
         # yt-dlp 옵션 설정
         ydl_opts = {

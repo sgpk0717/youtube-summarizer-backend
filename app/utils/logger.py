@@ -63,7 +63,7 @@ def setup_logger(name: str = "youtube_summarizer") -> logging.Logger:
     logger.setLevel(logging.DEBUG)
     
     # 로그 디렉토리 생성
-    log_dir = Path("/Users/seonggukpark/youtube-summarizer/backend/logs")
+    log_dir = Path(__file__).parent.parent.parent / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     
     # 파일명 생성 (날짜와 시간 포함)

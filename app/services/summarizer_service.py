@@ -20,7 +20,7 @@ class SummarizerService(LoggerMixin):
             raise ValueError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
         
         self.client = OpenAI(api_key=api_key)
-        self.model = "gpt-5"  # GPT-5.0 모델 사용
+        self.model = "gpt-5"  # GPT-5 모델 사용
         self.log_info(f"🤖 AI 요약 서비스 초기화 완료", data={"model": self.model})
     
     async def generate_summary(
@@ -93,20 +93,17 @@ class SummarizerService(LoggerMixin):
                 "prompt": full_prompt  # 전문 로깅
             })
             
-            # OpenAI ChatCompletion API 사용
-            # 참고: GPT-5는 아직 출시되지 않았으므로 gpt-4o-mini 사용
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",  # 실제로 사용 가능한 모델
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.3  # 일관된 요약을 위해 낮은 temperature
-                # max_tokens 제한 없음 - 모델이 필요한 만큼 사용
+            # GPT-5 API 사용 (CLAUDE.md 형식)
+            # OpenAI 라이브러리 1.107.3 버전에서 responses 메소드 지원
+            response = self.client.responses.create(
+                model=self.model,  # gpt-5
+                input=full_prompt,
+                reasoning={"effort": "medium"},  # 중간 수준의 추론
+                text={"verbosity": "medium"}  # 중간 수준의 상세도
             )
-            
-            # 응답 텍스트 추출
-            output_text = response.choices[0].message.content
+
+            # 응답 텍스트 추출 (GPT-5 형식)
+            output_text = response.output_text
             
             # API 응답 로깅 (전문)
             self.log_debug("📥 API 응답 수신", data={
