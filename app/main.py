@@ -19,6 +19,7 @@ from app.services.user_service import UserService
 from app.models.summary import SummaryResponse, SummarizeRequest, MultiAgentAnalyzeRequest, MultiAgentAnalyzeResponse
 from app.models.user import NicknameCheckResponse, NicknameLoginRequest, NicknameLoginResponse
 from app.utils.logger import setup_logger, log_function_call
+from datetime import datetime
 
 # 환경 변수 로드
 load_dotenv()
@@ -300,6 +301,54 @@ async def summarize_video(request: SummarizeRequest):
             detail=f"고급 분석 중 오류가 발생했습니다: {str(e)}"
         )
 
+
+
+@app.get("/api/health")
+async def health_check():
+    """
+    서버 상태 확인 엔드포인트
+
+    Returns:
+        dict: 서버 상태 정보
+    """
+    logger.info("🏥 헬스체크 요청 수신")
+
+    try:
+        # 각 서비스 상태 체크
+        db_status = "connected" if user_service and db_service else "disconnected"
+        yt_status = "ready" if youtube_service else "not_ready"
+        ai_status = "ready" if summarizer_service else "not_ready"
+        multi_agent_status = "ready" if multi_agent_service else "not_ready"
+
+        health_data = {
+            "status": "healthy",
+            "version": "1.0.0",
+            "timestamp": datetime.now().isoformat(),
+            "services": {
+                "database": db_status,
+                "youtube": yt_status,
+                "ai": ai_status,
+                "multi_agent": multi_agent_status
+            }
+        }
+
+        logger.info("✅ 헬스체크 성공", extra={"data": health_data})
+
+        return health_data
+
+    except Exception as e:
+        error_data = {
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+        logger.error("❌ 헬스체크 실패", extra={"data": error_data})
+
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=503,
+            content=error_data
+        )
 
 
 @app.get("/api/auth/check/{nickname}")
