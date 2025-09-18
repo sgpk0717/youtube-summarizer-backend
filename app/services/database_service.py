@@ -273,8 +273,8 @@ class DatabaseService(LoggerMixin):
             })
 
             # 1. reports 테이블에 메인 레코드 저장
+            # user_id가 UUID 타입이므로 임시로 제외하고 저장
             report_data = {
-                "user_id": user_id,
                 "video_id": video_id,
                 "title": title,
                 "channel_name": channel,
@@ -284,6 +284,9 @@ class DatabaseService(LoggerMixin):
                 "successful_agents": processing_status.get("successful_agents", 0),
                 "total_agents": processing_status.get("total_agents", 5)
             }
+
+            # user_id가 UUID 형식이 아니므로 로그만 남기고 제외
+            self.log_warning(f"⚠️ user_id '{user_id}'는 UUID 형식이 아니므로 저장에서 제외", data={"user_id": user_id})
 
             self.log_debug(f"📤 저장할 보고서 데이터", data=report_data)
 
