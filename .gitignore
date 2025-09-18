@@ -40,3 +40,4 @@ build/
 *.txt
 !requirements.txt
 !.gitkeep
+*_cookies.txt
