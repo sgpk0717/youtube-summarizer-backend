@@ -18,9 +18,10 @@ class SummarizerService(LoggerMixin):
         if not api_key:
             self.log_error("❌ OPENAI_API_KEY 환경 변수 누락")
             raise ValueError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
-        
+
         self.client = OpenAI(api_key=api_key)
-        self.model = "gpt-5"  # GPT-5 모델 사용
+        # 환경변수에서 모델명 읽기 (기본값: gpt-5)
+        self.model = os.getenv("LLM_MODEL", "gpt-5")
         self.log_info(f"🤖 AI 요약 서비스 초기화 완료", data={"model": self.model})
     
     async def generate_summary(

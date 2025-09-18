@@ -24,22 +24,23 @@ class BaseAgent(LoggerMixin, ABC):
     def __init__(self, agent_name: str):
         """
         베이스 에이전트 초기화
-        
+
         Args:
             agent_name: 에이전트 식별명 (로깅용)
         """
         self.agent_name = agent_name
         self.timeout = None  # 타임아웃 제거 - 긴 영상 처리를 위함
-        
+
         # OpenAI 클라이언트 초기화
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             self.log_error("❌ OPENAI_API_KEY 환경 변수 누락")
             raise ValueError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
-        
+
         self.openai_client = OpenAI(api_key=api_key)
-        self.model = "gpt-5"  # GPT-5 모델 사용
-        
+        # 환경변수에서 모델명 읽기 (기본값: gpt-5)
+        self.model = os.getenv("LLM_MODEL", "gpt-5")
+
         self.log_info(f"🤖 {self.agent_name} 에이전트 초기화 완료", data={
             "agent_name": self.agent_name,
             "model": self.model
