@@ -144,18 +144,28 @@ async def get_cookie_status():
 async def summarize_video(request: SummarizeRequest):
     """
     유튜브 영상 URL을 받아 멀티에이전트 시스템으로 고급 분석을 수행합니다.
-    
+
     Args:
         request: 유튜브 URL이 포함된 요청 객체
-    
+
     Returns:
         MultiAgentAnalyzeResponse: 상세한 분석 결과와 종합 보고서
-    
+
     Raises:
         400: 잘못된 URL 또는 자막 없음
         500: 서버 내부 오류
         503: 멀티에이전트 서비스 사용 불가
     """
+    # 요청 정보 상세 로깅
+    logger.info("📥 고급 분석 요청 수신", extra={"data": {
+        "url": request.url,
+        "user_id": getattr(request, 'user_id', None),
+        "user_id_type": type(getattr(request, 'user_id', None)).__name__,
+        "request_fields": list(request.__dict__.keys()),
+        "endpoint": "/api/summarize",
+        "client_ip": "unknown",  # FastAPI에서 클라이언트 IP 가져오려면 별도 로직 필요
+        "timestamp": datetime.now().isoformat()
+    }})
     # 멀티에이전트 서비스 사용 가능 여부 확인
     if multi_agent_service is None:
         logger.error("❌ 멀티에이전트 서비스 사용 불가")
@@ -242,8 +252,23 @@ async def summarize_video(request: SummarizeRequest):
         )
         
         # 5. DB에 저장 (백그라운드) - 멀티에이전트 결과용
-        if db_service and request.user_id:  # SummarizeRequest에 user_id 필드가 있음
+        logger.info("🗄️ DB 저장 시도", extra={"data": {
+            "has_db_service": db_service is not None,
+            "user_id": request.user_id,
+            "user_id_type": type(request.user_id).__name__,
+            "user_id_length": len(request.user_id) if request.user_id else 0,
+            "user_id_is_none": request.user_id is None,
+            "user_id_is_empty": request.user_id == "" if request.user_id else True
+        }})
+
+        if db_service and request.user_id and request.user_id.strip():  # 빈 문자열도 체크
             try:
+                logger.info("🔄 멀티에이전트 보고서 저장 시작", extra={"data": {
+                    "user_id": request.user_id,
+                    "video_id": video_data.video_id,
+                    "title": video_data.title
+                }})
+
                 # 멀티에이전트 결과를 DB에 저장
                 report_id = await db_service.save_multi_agent_report(
                     user_id=request.user_id,
@@ -273,7 +298,21 @@ async def summarize_video(request: SummarizeRequest):
                 else:
                     logger.warning("⚠️ 멀티에이전트 결과 DB 저장 실패")
             except Exception as e:
-                logger.error(f"❌ DB 저장 중 오류", extra={"data": {"error": str(e)}})
+                logger.error(f"❌ DB 저장 중 오류", extra={"data": {
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "user_id": request.user_id,
+                    "video_id": video_data.video_id,
+                    "has_agent_results": len(multi_agent_result.model_dump()) > 0,
+                    "processing_status": multi_agent_result.processing_status.status
+                }})
+        else:
+            logger.info("⏭️ DB 저장 건너뜀", extra={"data": {
+                "reason": "no_db_service" if not db_service else "no_user_id",
+                "has_db_service": db_service is not None,
+                "user_id_provided": request.user_id is not None,
+                "user_id_value": request.user_id if request.user_id else "None"
+            }})
 
         logger.info(f"✅ 고급 분석 완료: {video_data.video_id}", extra={"data": {
             "processing_time": f"{processing_time:.2f}초",

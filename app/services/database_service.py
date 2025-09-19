@@ -272,12 +272,18 @@ class DatabaseService(LoggerMixin):
                 "title": title
             })
 
-            # 1. reports 테이블에 메인 레코드 저장
-            # user_id가 UUID 타입이므로 임시로 제외하고 저장
+            # 1. analysis_reports 테이블에 메인 레코드 저장
+            # 닉네임을 UUID로 변환
+            actual_user_id = await self._get_or_create_user_id(user_id)
+            self.log_info(f"👤 닉네임을 UUID로 변환", data={
+                "nickname": user_id,
+                "user_uuid": actual_user_id
+            })
+
             report_data = {
                 "video_id": video_id,
                 "title": title,
-                "channel_name": channel,
+                "channel": channel,  # 테이블 컬럼명과 일치하도록 수정
                 "analysis_type": "multi_agent",
                 "status": processing_status.get("status", "completed"),
                 "processing_time": processing_status.get("total_processing_time"),
@@ -285,13 +291,14 @@ class DatabaseService(LoggerMixin):
                 "total_agents": processing_status.get("total_agents", 5)
             }
 
-            # user_id가 UUID 형식이 아니므로 로그만 남기고 제외
-            self.log_warning(f"⚠️ user_id '{user_id}'는 UUID 형식이 아니므로 저장에서 제외", data={"user_id": user_id})
+            # user_id가 있으면 포함
+            if actual_user_id:
+                report_data["user_id"] = actual_user_id
 
             self.log_debug(f"📤 저장할 보고서 데이터", data=report_data)
 
             # 보고서 삽입
-            report_response = self.client.table("reports")\
+            report_response = self.client.table("analysis_reports")\
                 .insert(report_data)\
                 .execute()
 
@@ -352,6 +359,53 @@ class DatabaseService(LoggerMixin):
             })
             return None
 
+    async def _get_or_create_user_id(self, nickname: str) -> str:
+        """
+        닉네임으로 사용자 UUID 조회 또는 생성
+
+        Args:
+            nickname: 사용자 닉네임
+
+        Returns:
+            사용자 UUID
+        """
+        try:
+            # 기존 사용자 검색
+            result = self.client.table('nicknames')\
+                .select('id')\
+                .ilike('nickname', nickname)\
+                .execute()
+
+            if result.data:
+                user_uuid = result.data[0]['id']
+                self.log_info(f"✅ 기존 사용자 발견", data={
+                    "nickname": nickname,
+                    "uuid": user_uuid
+                })
+                return user_uuid
+            else:
+                # 새 사용자 생성
+                import uuid
+                new_user = {
+                    "nickname": nickname
+                }
+                result = self.client.table('nicknames').insert(new_user).execute()
+                user_uuid = result.data[0]['id']
+
+                self.log_info(f"✅ 새 사용자 생성", data={
+                    "nickname": nickname,
+                    "uuid": user_uuid
+                })
+                return user_uuid
+
+        except Exception as e:
+            self.log_error(f"❌ 사용자 ID 조회/생성 실패", data={
+                "nickname": nickname,
+                "error": str(e)
+            })
+            # 임시로 닉네임 직접 사용 (호환성 유지)
+            return nickname
+
     async def get_user_reports(
         self,
         user_id: str,
@@ -361,7 +415,7 @@ class DatabaseService(LoggerMixin):
         사용자별 분석 보고서 목록 조회
 
         Args:
-            user_id: 사용자 ID
+            user_id: 사용자 ID (닉네임)
             limit: 결과 제한 수
 
         Returns:
@@ -373,9 +427,12 @@ class DatabaseService(LoggerMixin):
                 "limit": limit
             })
 
-            response = self.client.table("reports")\
+            # 닉네임을 UUID로 변환
+            actual_user_id = await self._get_or_create_user_id(user_id)
+
+            response = self.client.table("analysis_reports")\
                 .select("*")\
-                .eq("user_id", user_id)\
+                .eq("user_id", actual_user_id)\
                 .order("created_at", desc=True)\
                 .limit(limit)\
                 .execute()
@@ -414,7 +471,7 @@ class DatabaseService(LoggerMixin):
             self.log_info(f"📖 보고서 상세 조회", data={"report_id": report_id})
 
             # 보고서 메인 정보 조회
-            report_response = self.client.table("reports")\
+            report_response = self.client.table("analysis_reports")\
                 .select("*")\
                 .eq("id", report_id)\
                 .execute()
