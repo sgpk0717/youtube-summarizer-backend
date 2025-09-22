@@ -275,6 +275,9 @@ async def summarize_video(request: SummarizeRequest):
                     video_id=video_data.video_id,
                     title=video_data.title,
                     channel=video_data.channel,
+                    duration=video_data.duration,
+                    language=video_data.language,
+                    final_report=final_report,
                     agent_results={
                         "transcript_refinement": multi_agent_result.transcript_refinement,
                         "speaker_diarization": multi_agent_result.speaker_diarization,
