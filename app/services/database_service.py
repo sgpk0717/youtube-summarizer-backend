@@ -93,7 +93,7 @@ class DatabaseService(LoggerMixin):
             data = {
                 "video_id": video_data.video_id,
                 "title": video_data.title,
-                "channel_name": video_data.channel,
+                "channel": video_data.channel,
                 "duration": video_data.duration,
                 "transcript_text": video_data.transcript,
                 "transcript_json": transcript_array,  # [{text: "", start: 0, duration: 0}, ...]
@@ -177,7 +177,7 @@ class DatabaseService(LoggerMixin):
             
             # 필터 적용
             if channel:
-                query_builder = query_builder.eq("channel_name", channel)
+                query_builder = query_builder.eq("channel", channel)
             
             if language:
                 query_builder = query_builder.eq("language_code", language)
@@ -223,7 +223,7 @@ class DatabaseService(LoggerMixin):
             self.log_info(f"🌟 인기 비디오 조회 시작")
 
             response = self.client.table("videos")\
-                .select("video_id, title, channel_name, language_code, access_count, created_at")\
+                .select("video_id, title, channel, language_code, access_count, created_at")\
                 .order("access_count", desc=True)\
                 .limit(limit)\
                 .execute()
@@ -285,10 +285,7 @@ class DatabaseService(LoggerMixin):
                 "title": title,
                 "channel": channel,  # 테이블 컬럼명과 일치하도록 수정
                 "analysis_type": "multi_agent",
-                "status": processing_status.get("status", "completed"),
-                "processing_time": processing_status.get("total_processing_time"),
-                "successful_agents": processing_status.get("successful_agents", 0),
-                "total_agents": processing_status.get("total_agents", 5)
+                "processing_time": processing_status.get("total_processing_time")
             }
 
             # user_id가 있으면 포함

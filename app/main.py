@@ -543,5 +543,163 @@ async def refresh_cookies():
         raise HTTPException(status_code=500, detail="쿠키 갱신 실패")
 
 
+# 테스트용 조회 API
+@app.get("/api/test/reports")
+async def get_all_reports():
+    """
+    테스트용: 모든 분석 보고서 조회
+    - 데이터베이스에 저장된 모든 보고서를 조회합니다
+    - user_id와 nickname 정보도 함께 반환합니다
+    """
+    try:
+        logger.info("📊 전체 보고서 조회 시작")
+
+        # 보고서와 닉네임 정보를 조인하여 조회
+        response = db_service.client.table("analysis_reports")\
+            .select("*, nicknames!left(id, nickname)")\
+            .order("created_at", desc=True)\
+            .limit(10)\
+            .execute()
+
+        if response.data:
+            logger.info(f"✅ {len(response.data)}개 보고서 조회 성공")
+            for report in response.data:
+                # nicknames 정보 처리
+                if report.get('nicknames'):
+                    report['user_nickname'] = report['nicknames'].get('nickname')
+                    del report['nicknames']
+                else:
+                    report['user_nickname'] = None
+
+            return {
+                "status": "success",
+                "count": len(response.data),
+                "reports": response.data
+            }
+        else:
+            logger.info("ℹ️ 저장된 보고서 없음")
+            return {
+                "status": "success",
+                "count": 0,
+                "reports": []
+            }
+
+    except Exception as e:
+        logger.error(f"❌ 보고서 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"보고서 조회 실패: {str(e)}")
+
+
+@app.get("/api/test/reports/{video_id}")
+async def get_report_by_video(video_id: str):
+    """
+    테스트용: 특정 비디오의 분석 보고서 조회
+    - video_id로 보고서를 조회합니다
+    - user_id와 nickname 정보도 함께 반환합니다
+    """
+    try:
+        logger.info(f"📊 비디오별 보고서 조회: {video_id}")
+
+        response = db_service.client.table("analysis_reports")\
+            .select("*, nicknames!left(id, nickname)")\
+            .eq("video_id", video_id)\
+            .execute()
+
+        if response.data:
+            logger.info(f"✅ {len(response.data)}개 보고서 발견")
+            for report in response.data:
+                # nicknames 정보 처리
+                if report.get('nicknames'):
+                    report['user_nickname'] = report['nicknames'].get('nickname')
+                    del report['nicknames']
+                else:
+                    report['user_nickname'] = None
+
+            return {
+                "status": "success",
+                "video_id": video_id,
+                "count": len(response.data),
+                "reports": response.data
+            }
+        else:
+            logger.info(f"ℹ️ {video_id}에 대한 보고서 없음")
+            return {
+                "status": "success",
+                "video_id": video_id,
+                "count": 0,
+                "reports": []
+            }
+
+    except Exception as e:
+        logger.error(f"❌ 보고서 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"보고서 조회 실패: {str(e)}")
+
+
+@app.post("/api/test/save-report")
+async def test_save_report(
+    user_id: str = "Rex",
+    video_id: str = "test123",
+    title: str = "테스트 비디오",
+    channel: str = "테스트 채널"
+):
+    """
+    테스트용: 보고서 저장 테스트
+    - 닉네임을 UUID로 변환하여 저장하는 기능을 테스트합니다
+    """
+    try:
+        logger.info(f"🧪 테스트 보고서 저장 시작: {user_id}")
+
+        # 더미 에이전트 결과
+        agent_results = {
+            "transcript_refinement": {"success": True, "result": {"test": "data"}},
+            "speaker_diarization": {"success": True, "result": {"test": "data"}},
+            "topic_cohesion": {"success": True, "result": {"test": "data"}},
+            "structure_design": {"success": True, "result": {"test": "data"}},
+            "report_synthesis": {"success": True, "result": {"test": "data"}}
+        }
+
+        processing_status = {
+            "total_processing_time": 1.23,
+            "status": "completed"
+        }
+
+        # 보고서 저장
+        report_id = await db_service.save_multi_agent_report(
+            user_id=user_id,
+            video_id=video_id,
+            title=title,
+            channel=channel,
+            agent_results=agent_results,
+            processing_status=processing_status
+        )
+
+        if report_id:
+            logger.info(f"✅ 테스트 보고서 저장 성공: {report_id}")
+
+            # 저장된 보고서 조회
+            saved_report = db_service.client.table("analysis_reports")\
+                .select("*, nicknames!left(id, nickname)")\
+                .eq("id", report_id)\
+                .single()\
+                .execute()
+
+            if saved_report.data:
+                if saved_report.data.get('nicknames'):
+                    saved_report.data['user_nickname'] = saved_report.data['nicknames'].get('nickname')
+                    del saved_report.data['nicknames']
+
+            return {
+                "status": "success",
+                "report_id": report_id,
+                "message": f"보고서가 성공적으로 저장되었습니다 (user: {user_id})",
+                "saved_report": saved_report.data
+            }
+        else:
+            raise HTTPException(status_code=500, detail="보고서 저장 실패")
+
+    except Exception as e:
+        logger.error(f"❌ 테스트 보고서 저장 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"테스트 실패: {str(e)}")
+
+
 # Swagger UI는 /docs에서 자동으로 제공됨
 # ReDoc은 /redoc에서 자동으로 제공됨
