@@ -42,3 +42,4 @@ build/
 !.gitkeep
 *_cookies.txt
 www.youtube.com_cookies.txt
+firebase-service-account.json

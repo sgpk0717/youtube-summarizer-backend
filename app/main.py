@@ -164,12 +164,17 @@ async def summarize_video(request: SummarizeRequest):
         500: 서버 내부 오류
         503: 멀티에이전트 서비스 사용 불가
     """
-    # 요청 정보 상세 로깅
+    # 요청 정보 상세 로깅 (FCM 토큰 포함)
+    fcm_token = request.fcm_token  # 직접 접근
     logger.info("📥 고급 분석 요청 수신", extra={"data": {
         "url": request.url,
-        "user_id": getattr(request, 'user_id', None),
-        "user_id_type": type(getattr(request, 'user_id', None)).__name__,
+        "user_id": request.user_id,
+        "user_id_type": type(request.user_id).__name__,
+        "has_fcm_token": bool(fcm_token),
+        "fcm_token_preview": fcm_token[:20] + "..." if fcm_token else None,
+        "fcm_token_length": len(fcm_token) if fcm_token else 0,
         "request_fields": list(request.__dict__.keys()),
+        "request_data": request.model_dump(),  # 전체 요청 데이터
         "endpoint": "/api/summarize",
         "client_ip": "unknown",  # FastAPI에서 클라이언트 IP 가져오려면 별도 로직 필요
         "timestamp": datetime.now().isoformat()
@@ -332,17 +337,45 @@ async def summarize_video(request: SummarizeRequest):
         }})
 
         # FCM 푸시 알림 전송 (옵셔널 - 실패해도 응답에 영향 없음)
-        if hasattr(request, 'fcm_token') and request.fcm_token:
+        fcm_token = request.fcm_token  # getattr 대신 직접 접근
+        logger.info("🔍 FCM 토큰 확인", extra={"data": {
+            "has_fcm_token": bool(fcm_token),
+            "fcm_token_preview": fcm_token[:20] + "..." if fcm_token else None,
+            "fcm_token_length": len(fcm_token) if fcm_token else 0,
+            "fcm_service_available": fcm_service.is_available(),
+            "fcm_token_full": fcm_token  # 디버깅용 전체 토큰
+        }})
+
+        if fcm_token:
             try:
-                logger.info("📱 FCM 푸시 알림 전송 시도")
-                await fcm_service.send_analysis_complete_notification(
-                    fcm_token=request.fcm_token,
+                logger.info("📱 FCM 푸시 알림 전송 시도", extra={"data": {
+                    "fcm_token": fcm_token[:30] + "..." if len(fcm_token) > 30 else fcm_token,
+                    "video_title": video_data.title,
+                    "video_id": video_data.video_id
+                }})
+
+                result = await fcm_service.send_analysis_complete_notification(
+                    fcm_token=fcm_token,
                     video_title=video_data.title,
                     video_id=video_data.video_id
                 )
+
+                logger.info("📱 FCM 전송 결과", extra={"data": {
+                    "success": result,
+                    "fcm_token_used": fcm_token[:20] + "..."
+                }})
             except Exception as fcm_error:
                 # FCM 전송 실패해도 분석 결과는 정상 반환
-                logger.warning(f"⚠️ FCM 전송 실패 (무시하고 계속): {fcm_error}")
+                logger.warning("⚠️ FCM 전송 실패 (무시하고 계속)", extra={"data": {
+                    "error": str(fcm_error),
+                    "error_type": type(fcm_error).__name__,
+                    "fcm_token_tried": fcm_token[:20] + "..."
+                }})
+        else:
+            logger.info("🔕 FCM 전송 건너뜀", extra={"data": {
+                "reason": "no_fcm_token",
+                "request_fields": list(request.__dict__.keys())
+            }})
 
         return response
         
@@ -530,6 +563,79 @@ async def get_user_reports(user_id: str):
     except Exception as e:
         logger.error(f"❌ 보고서 목록 조회 실패", extra={"data": {"error": str(e)}})
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/summaries")
+async def get_summaries(user_id: Optional[str] = None):
+    """
+    요약 목록 조회 (프론트엔드 호환용)
+
+    Args:
+        user_id: 사용자 ID (쿼리 파라미터)
+
+    Returns:
+        사용자의 요약 목록 (배열 형태로 반환)
+    """
+    logger.info(f"📥 요약 목록 조회 요청", extra={"data": {"user_id": user_id}})
+
+    try:
+        if not user_id:
+            # user_id가 없으면 빈 배열 반환
+            logger.info("📋 user_id 없음, 빈 목록 반환")
+            return []
+
+        if db_service:
+            # 데이터베이스에서 사용자별 보고서 조회
+            reports = await db_service.get_user_reports(user_id=user_id, limit=20)
+
+            # 프론트엔드 호환 형식으로 변환
+            summaries = []
+            for report in reports:
+                # final_report에서 한 줄 요약 추출 시도
+                final_report = report.get("final_report", "")
+                one_line_summary = ""
+                if final_report:
+                    # 첫 번째 문장이나 첫 줄을 한 줄 요약으로 사용
+                    lines = final_report.split('\n')
+                    for line in lines:
+                        if line.strip() and not line.startswith('#'):
+                            one_line_summary = line.strip()[:200]  # 최대 200자
+                            break
+
+                summary = {
+                    "video_id": report.get("video_id"),
+                    "url": f"https://youtube.com/watch?v={report.get('video_id')}",
+                    "title": report.get("title"),
+                    "channel": report.get("channel", ""),  # channel_title -> channel
+                    "channel_title": report.get("channel", ""),  # 호환성 유지
+                    "duration": report.get("duration", ""),
+                    "thumbnail_url": f"https://i.ytimg.com/vi/{report.get('video_id')}/maxresdefault.jpg",
+                    "published_at": report.get("created_at"),
+                    "view_count": 0,  # 백엔드에서 제공하지 않음
+                    "summary": final_report,  # 전체 보고서
+                    "one_line": one_line_summary,  # 한 줄 요약
+                    "one_line_summary": one_line_summary,  # 호환성
+                    "key_points": [],  # 빈 배열로 초기화
+                    "detailed_summary": final_report,  # 상세 요약
+                    "created_at": report.get("created_at"),
+                    "multi_agent": True,  # 멀티에이전트 결과임을 표시
+                    "report_id": report.get("id"),  # 보고서 ID 추가
+                    "id": report.get("id")  # id 필드 추가
+                }
+                summaries.append(summary)
+
+            logger.info(f"✅ 요약 목록 조회 완료", extra={"data": {
+                "user_id": user_id,
+                "count": len(summaries)
+            }})
+
+            return summaries  # 배열로 직접 반환
+        else:
+            logger.warning("⚠️ 데이터베이스 서비스 사용 불가")
+            return []
+    except Exception as e:
+        logger.error(f"❌ 요약 목록 조회 실패", extra={"data": {"error": str(e)}})
+        return []  # 에러 시에도 빈 배열 반환
 
 
 @app.get("/health")

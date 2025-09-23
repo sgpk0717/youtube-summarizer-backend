@@ -72,9 +72,11 @@ class FCMService(LoggerMixin):
             성공 여부
         """
         if not self.initialized or not fcm_token:
-            self.log_debug("🔕 FCM 전송 건너뜀", data={
+            self.log_warning("🔕 FCM 전송 건너뜀", data={
                 "initialized": self.initialized,
-                "has_token": bool(fcm_token)
+                "has_token": bool(fcm_token),
+                "token_length": len(fcm_token) if fcm_token else 0,
+                "token_preview": fcm_token[:20] + "..." if fcm_token else None
             })
             return False
 
@@ -82,7 +84,10 @@ class FCMService(LoggerMixin):
             self.log_info("📤 FCM 알림 전송 시작", data={
                 "title": title,
                 "body": body[:50] + "..." if len(body) > 50 else body,
-                "has_data": bool(data)
+                "has_data": bool(data),
+                "token": fcm_token[:30] + "..." if len(fcm_token) > 30 else fcm_token,
+                "token_length": len(fcm_token),
+                "data_payload": data
             })
 
             # 메시지 구성
@@ -112,20 +117,40 @@ class FCMService(LoggerMixin):
             )
 
             # 메시지 전송
+            self.log_info("🚀 FCM 메시지 전송 중...", data={
+                "token_used": fcm_token[:30] + "...",
+                "title": title
+            })
+
             response = messaging.send(message)
-            self.log_info("✅ FCM 알림 전송 성공", data={"response": response})
+
+            self.log_info("✅ FCM 알림 전송 성공", data={
+                "response": response,
+                "message_id": response,
+                "token_used": fcm_token[:30] + "...",
+                "delivered_to_fcm": True
+            })
             return True
 
         except messaging.UnregisteredError:
-            self.log_warning("⚠️ FCM 토큰이 등록 해제됨")
+            self.log_warning("⚠️ FCM 토큰이 등록 해제됨", data={
+                "token": fcm_token[:30] + "...",
+                "error_detail": "Token is no longer registered"
+            })
             return False
         except messaging.SenderIdMismatchError:
-            self.log_warning("⚠️ FCM Sender ID 불일치")
+            self.log_warning("⚠️ FCM Sender ID 불일치", data={
+                "token": fcm_token[:30] + "...",
+                "error_detail": "Sender ID doesn't match"
+            })
             return False
         except Exception as e:
             self.log_error("❌ FCM 전송 실패", data={
                 "error": str(e),
-                "error_type": type(e).__name__
+                "error_type": type(e).__name__,
+                "token_tried": fcm_token[:30] + "...",
+                "title": title,
+                "body": body[:50] + "..."
             })
             return False
 
@@ -147,8 +172,17 @@ class FCMService(LoggerMixin):
             성공 여부
         """
         if not fcm_token:
-            self.log_debug("🔕 FCM 토큰 없음 - 알림 전송 건너뜀")
+            self.log_warning("🔕 FCM 토큰 없음 - 알림 전송 건너뜀", data={
+                "video_title": video_title,
+                "video_id": video_id
+            })
             return False
+
+        self.log_info("🎬 분석 완료 알림 준비", data={
+            "fcm_token": fcm_token[:30] + "...",
+            "video_title": video_title,
+            "video_id": video_id
+        })
 
         title = "🎉 분석 완료!"
         body = f"{video_title} 영상 분석이 완료되었습니다. 결과를 확인해보세요!"
@@ -158,7 +192,14 @@ class FCMService(LoggerMixin):
             "video_title": video_title
         }
 
-        return await self.send_notification(fcm_token, title, body, data)
+        result = await self.send_notification(fcm_token, title, body, data)
+
+        self.log_info("🎬 분석 완료 알림 결과", data={
+            "success": result,
+            "video_id": video_id
+        })
+
+        return result
 
     def is_available(self) -> bool:
         """FCM 서비스 사용 가능 여부"""

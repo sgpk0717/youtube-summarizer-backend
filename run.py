@@ -13,9 +13,9 @@ if __name__ == "__main__":
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", 8000))
     
-    print(f"🚀 서버 시작: http://{host}:{port}")
-    print(f"📚 API 문서: http://localhost:{port}/docs")
-    print(f"📖 ReDoc: http://localhost:{port}/redoc")
+    print(f"Server starting: http://{host}:{port}")
+    print(f"API Docs: http://localhost:{port}/docs")
+    print(f"ReDoc: http://localhost:{port}/redoc")
     
     # 서버 실행
     uvicorn.run(

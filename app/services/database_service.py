@@ -4,7 +4,7 @@ Supabase 데이터베이스 서비스 모듈
 """
 import os
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from supabase import create_client, Client
 from app.utils.logger import LoggerMixin
 from app.models.summary import VideoData, Summary
@@ -89,6 +89,10 @@ class DatabaseService(LoggerMixin):
         try:
             self.log_info(f"💾 비디오 저장 시작: {video_data.video_id}")
 
+            # 한국 시간 (KST) 설정
+            kst = timezone(timedelta(hours=9))
+            now_kst = datetime.now(kst)
+
             # 저장할 데이터 준비
             data = {
                 "video_id": video_data.video_id,
@@ -102,6 +106,8 @@ class DatabaseService(LoggerMixin):
                 "summary_brief": summary.brief,
                 "summary_key_points": summary.key_points,
                 "summary_detailed": summary.detailed,
+                "created_at": now_kst.isoformat(),  # 한국 시간으로 명시적 설정
+                "updated_at": now_kst.isoformat()  # 한국 시간으로 명시적 설정
             }
 
             # 로깅 (전문)
@@ -280,10 +286,17 @@ class DatabaseService(LoggerMixin):
 
             # 1. analysis_reports 테이블에 메인 레코드 저장
             # 닉네임을 UUID로 변환
+            self.log_info(f"🔄 사용자 UUID 변환 시작", data={
+                "input_user_id": user_id,
+                "user_id_type": type(user_id).__name__
+            })
+
             actual_user_id = await self._get_or_create_user_id(user_id)
+
             self.log_info(f"👤 닉네임을 UUID로 변환", data={
                 "nickname": user_id,
-                "user_uuid": actual_user_id
+                "user_uuid": actual_user_id,
+                "uuid_length": len(actual_user_id) if actual_user_id else 0
             })
 
             report_data = {
@@ -306,12 +319,31 @@ class DatabaseService(LoggerMixin):
             if actual_user_id:
                 report_data["user_id"] = actual_user_id
 
-            self.log_debug(f"📤 저장할 보고서 데이터", data=report_data)
+            self.log_info(f"📤 저장할 보고서 데이터 준비", data={
+                "video_id": video_id,
+                "title": title[:50] + "..." if len(title) > 50 else title,
+                "user_id": actual_user_id,
+                "has_final_report": bool(final_report),
+                "agent_result_count": len(agent_results) if agent_results else 0,
+                "processing_status": processing_status.get("status") if processing_status else None
+            })
+
+            self.log_debug(f"📤 보고서 데이터 상세", data=report_data)
 
             # 보고서 삽입
+            self.log_info(f"💾 DB 삽입 시작", data={
+                "table": "analysis_reports",
+                "video_id": video_id
+            })
+
             report_response = self.client.table("analysis_reports")\
                 .insert(report_data)\
                 .execute()
+
+            self.log_debug(f"💾 DB 삽입 결과", data={
+                "success": bool(report_response.data),
+                "response_count": len(report_response.data) if report_response.data else 0
+            })
 
             if not report_response.data or len(report_response.data) == 0:
                 self.log_error("❌ 보고서 저장 실패 - 응답 없음")
@@ -337,17 +369,27 @@ class DatabaseService(LoggerMixin):
                     }
                     agent_records.append(agent_record)
                     self.log_debug(f"📊 {agent_type} 에이전트 결과 준비", data={
+                        "agent_type": agent_type,
                         "success": True,
-                        "has_data": bool(agent_data.get("result"))
+                        "has_data": bool(agent_data.get("result")),
+                        "processing_time": agent_data.get("processing_time", 0)
                     })
 
             # 에이전트 결과들 한번에 삽입
             if agent_records:
-                self.log_info(f"📤 {len(agent_records)}개 에이전트 결과 저장 시작")
+                self.log_info(f"📤 {len(agent_records)}개 에이전트 결과 저장 시작", data={
+                    "report_id": report_id,
+                    "agent_types": [r["agent_type"] for r in agent_records]
+                })
 
                 agent_response = self.client.table("agent_results")\
                     .insert(agent_records)\
                     .execute()
+
+                self.log_debug(f"📤 에이전트 결과 DB 삽입 결과", data={
+                    "success": bool(agent_response.data),
+                    "inserted_count": len(agent_response.data) if agent_response.data else 0
+                })
 
                 if agent_response.data:
                     self.log_info(f"✅ 에이전트 결과 저장 성공", data={
@@ -382,10 +424,20 @@ class DatabaseService(LoggerMixin):
         """
         try:
             # 기존 사용자 검색
+            self.log_info(f"🔍 닉네임 DB 검색", data={
+                "nickname": nickname,
+                "table": "nicknames"
+            })
+
             result = self.client.table('nicknames')\
                 .select('id')\
                 .ilike('nickname', nickname)\
                 .execute()
+
+            self.log_debug(f"🔍 닉네임 검색 결과", data={
+                "found": bool(result.data),
+                "count": len(result.data) if result.data else 0
+            })
 
             if result.data:
                 user_uuid = result.data[0]['id']
@@ -400,7 +452,17 @@ class DatabaseService(LoggerMixin):
                 new_user = {
                     "nickname": nickname
                 }
+                self.log_info(f"➕ 새 사용자 생성 시작", data={
+                    "nickname": nickname
+                })
+
                 result = self.client.table('nicknames').insert(new_user).execute()
+
+                self.log_debug(f"📦 사용자 삽입 결과", data={
+                    "success": bool(result.data),
+                    "data": result.data
+                })
+
                 user_uuid = result.data[0]['id']
 
                 self.log_info(f"✅ 새 사용자 생성", data={
@@ -435,11 +497,25 @@ class DatabaseService(LoggerMixin):
         try:
             self.log_info(f"📚 사용자 보고서 목록 조회", data={
                 "user_id": user_id,
+                "user_id_type": type(user_id).__name__,
+                "user_id_length": len(user_id) if user_id else 0,
                 "limit": limit
             })
 
             # 닉네임을 UUID로 변환
+            self.log_info(f"🔄 UUID 변환 시작", data={"nickname": user_id})
             actual_user_id = await self._get_or_create_user_id(user_id)
+            self.log_info(f"✅ UUID 변환 완료", data={
+                "nickname": user_id,
+                "uuid": actual_user_id
+            })
+
+            self.log_info(f"🔍 DB 쿼리 실행", data={
+                "table": "analysis_reports",
+                "filter_user_id": actual_user_id,
+                "order_by": "created_at DESC",
+                "limit": limit
+            })
 
             response = self.client.table("analysis_reports")\
                 .select("*")\
@@ -451,7 +527,10 @@ class DatabaseService(LoggerMixin):
             if response.data:
                 self.log_info(f"✅ 보고서 목록 조회 성공", data={
                     "user_id": user_id,
-                    "count": len(response.data)
+                    "actual_user_id": actual_user_id,
+                    "count": len(response.data),
+                    "first_report_id": response.data[0].get("id") if response.data else None,
+                    "first_video_id": response.data[0].get("video_id") if response.data else None
                 })
                 return response.data
             else:
