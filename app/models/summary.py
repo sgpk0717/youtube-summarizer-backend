@@ -11,6 +11,7 @@ class SummarizeRequest(BaseModel):
     """요약 요청 모델"""
     url: str = Field(..., description="유튜브 영상 URL", example="https://youtube.com/watch?v=dQw4w9WgXcQ")
     user_id: Optional[str] = Field(None, description="사용자 ID (옵션)")
+    fcm_token: Optional[str] = Field(None, description="FCM 푸시 알림 토큰 (옵션)")
 
 
 class Summary(BaseModel):

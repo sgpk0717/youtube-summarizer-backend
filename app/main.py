@@ -16,6 +16,7 @@ from app.services.summarizer_service import SummarizerService
 from app.services.database_service import DatabaseService
 from app.services.multi_agent_service import MultiAgentService
 from app.services.user_service import UserService
+from app.services.fcm_service import get_fcm_service
 from app.models.summary import SummaryResponse, SummarizeRequest, MultiAgentAnalyzeRequest, MultiAgentAnalyzeResponse
 from app.models.user import NicknameCheckResponse, NicknameLoginRequest, NicknameLoginResponse
 from app.utils.logger import setup_logger, log_function_call
@@ -67,6 +68,13 @@ except Exception as e:
 
 summarizer_service = SummarizerService()
 user_service = UserService()
+
+# FCM 서비스 초기화 (옵셔널 - 실패해도 앱 실행에 영향 없음)
+fcm_service = get_fcm_service()
+if fcm_service.is_available():
+    logger.info("✅ FCM 서비스 사용 가능")
+else:
+    logger.info("ℹ️ FCM 서비스 사용 불가 (푸시 알림 비활성화)")
 
 # 멀티에이전트 서비스 초기화
 try:
@@ -319,7 +327,20 @@ async def summarize_video(request: SummarizeRequest):
             "status": multi_agent_result.processing_status.status,
             "successful_agents": multi_agent_result.successful_agents
         }})
-        
+
+        # FCM 푸시 알림 전송 (옵셔널 - 실패해도 응답에 영향 없음)
+        if hasattr(request, 'fcm_token') and request.fcm_token:
+            try:
+                logger.info("📱 FCM 푸시 알림 전송 시도")
+                await fcm_service.send_analysis_complete_notification(
+                    fcm_token=request.fcm_token,
+                    video_title=video_data.title,
+                    video_id=video_data.video_id
+                )
+            except Exception as fcm_error:
+                # FCM 전송 실패해도 분석 결과는 정상 반환
+                logger.warning(f"⚠️ FCM 전송 실패 (무시하고 계속): {fcm_error}")
+
         return response
         
     except HTTPException as e:
