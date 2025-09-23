@@ -248,6 +248,9 @@ class DatabaseService(LoggerMixin):
         video_id: str,
         title: str,
         channel: str,
+        duration: Optional[float],
+        language: Optional[str],
+        final_report: Optional[str],
         agent_results: Dict[str, Any],
         processing_status: Dict[str, Any]
     ) -> Optional[str]:
@@ -259,6 +262,9 @@ class DatabaseService(LoggerMixin):
             video_id: YouTube 비디오 ID
             title: 비디오 제목
             channel: 채널명
+            duration: 비디오 길이(초)
+            language: 비디오 언어
+            final_report: 최종 분석 보고서
             agent_results: 에이전트별 분석 결과
             processing_status: 처리 상태 정보
 
@@ -284,6 +290,14 @@ class DatabaseService(LoggerMixin):
                 "video_id": video_id,
                 "title": title,
                 "channel": channel,  # 테이블 컬럼명과 일치하도록 수정
+                "duration": duration,
+                "language": language,
+                "analysis_result": {
+                    "agent_results": agent_results,
+                    "processing_status": processing_status
+                },
+                "final_report": final_report,
+                "transcript_available": True,
                 "analysis_type": "multi_agent",
                 "processing_time": processing_status.get("total_processing_time")
             }
