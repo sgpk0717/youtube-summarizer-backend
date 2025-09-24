@@ -111,11 +111,20 @@ class YouTubeServiceYtDlp(LoggerMixin):
 
             # User-Agent 설정 (중요! 봇 감지 방지)
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+
             # 자막 옵션
             'writesubtitles': True,
             'writeautomaticsub': True,
             'subtitleslangs': ['ko', 'en', 'ja', 'zh'],
             'skip_download': True,  # 영상은 다운로드하지 않음
+
+            # YouTube 특별 설정 - PO Token 없이 web 클라이언트 우선 사용
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['web', 'web_creator', 'web_embedded'],  # PO Token 불필요 클라이언트
+                    'skip': ['ios', 'android'],  # 쿠키 지원 안되는 클라이언트 제외
+                }
+            },
 
             # 추출 옵션
             'extract_flat': False,
@@ -232,35 +241,77 @@ class YouTubeServiceYtDlp(LoggerMixin):
         # 자동 생성 자막
         automatic_captions = info.get('automatic_captions', {})
 
-        # 우선순위: 1. 한국어 자막, 2. 영어 자막, 3. 기타 언어
-        language_priority = ['ko', 'en', 'ja', 'zh', 'zh-Hans', 'zh-Hant']
+        # 사용 가능한 자막 언어 로깅
+        self.log_info("📋 사용 가능한 자막 언어", data={
+            "manual_subtitles": list(subtitles.keys()),
+            "auto_captions": list(automatic_captions.keys())
+        })
 
-        # 수동 자막 우선 확인
-        for lang in language_priority:
+        # 한국어 자막만 우선 확인 (수동/자동 모두)
+        korean_langs = ['ko', 'ko-KR']
+
+        # 1. 한국어 수동 자막 확인
+        for lang in korean_langs:
             if lang in subtitles:
+                self.log_info(f"✅ 한국어 수동 자막 발견: {lang}")
                 subtitle_text = self._download_subtitle(subtitles[lang], lang, is_auto=False)
                 if subtitle_text:
                     return subtitle_text, lang
 
-        # 자동 생성 자막 확인
-        for lang in language_priority:
+        # 2. 한국어 자동 자막 확인 (이것을 우선!)
+        for lang in korean_langs:
             if lang in automatic_captions:
+                self.log_info(f"✅ 한국어 자동 자막 발견: {lang}")
                 subtitle_text = self._download_subtitle(automatic_captions[lang], lang, is_auto=True)
                 if subtitle_text:
                     return subtitle_text, f"{lang}-auto"
 
-        # 아무 자막이나 가져오기
+        # 3. 한국어가 없으면 영어 확인
+        english_langs = ['en', 'en-US']
+        for lang in english_langs:
+            if lang in subtitles:
+                self.log_warning(f"⚠️ 한국어 자막 없음. 영어 자막 사용: {lang}")
+                subtitle_text = self._download_subtitle(subtitles[lang], lang, is_auto=False)
+                if subtitle_text:
+                    return subtitle_text, lang
+
+        for lang in english_langs:
+            if lang in automatic_captions:
+                self.log_warning(f"⚠️ 한국어 자막 없음. 영어 자동 자막 사용: {lang}")
+                subtitle_text = self._download_subtitle(automatic_captions[lang], lang, is_auto=True)
+                if subtitle_text:
+                    return subtitle_text, f"{lang}-auto"
+
+        # 다른 언어 자막이 있는 경우 (ja, zh 등)
+        # 하지만 이런 경우 경고 로그 남기기
+        other_langs = []
         if subtitles:
-            lang = list(subtitles.keys())[0]
+            # 일본어, 중국어 등 다른 언어 확인
+            for lang in ['ja', 'zh', 'zh-Hans', 'zh-Hant']:
+                if lang in subtitles:
+                    other_langs.append(lang)
+
+        if other_langs:
+            lang = other_langs[0]
+            self.log_warning(f"⚠️ 한국어/영어 자막 없음. {lang} 자막 사용", data={
+                "selected_language": lang,
+                "available_languages": list(subtitles.keys())
+            })
             subtitle_text = self._download_subtitle(subtitles[lang], lang, is_auto=False)
             if subtitle_text:
                 return subtitle_text, lang
 
+        # 자동 생성 자막에서도 다른 언어 확인
         if automatic_captions:
-            lang = list(automatic_captions.keys())[0]
-            subtitle_text = self._download_subtitle(automatic_captions[lang], lang, is_auto=True)
-            if subtitle_text:
-                return subtitle_text, f"{lang}-auto"
+            for lang in ['ja', 'zh', 'zh-Hans', 'zh-Hant']:
+                if lang in automatic_captions:
+                    self.log_warning(f"⚠️ 한국어/영어 자막 없음. {lang} 자동 자막 사용", data={
+                        "selected_language": f"{lang}-auto",
+                        "available_languages": list(automatic_captions.keys())
+                    })
+                    subtitle_text = self._download_subtitle(automatic_captions[lang], lang, is_auto=True)
+                    if subtitle_text:
+                        return subtitle_text, f"{lang}-auto"
 
         self.log_warning("⚠️ 자막을 찾을 수 없음")
         return None, None

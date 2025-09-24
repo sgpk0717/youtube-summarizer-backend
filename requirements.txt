@@ -1,12 +1,38 @@
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-youtube-transcript-api==1.2.2
-yt-dlp>=2024.10.22
-openai==1.107.0
-pydantic==2.10.5
-python-dotenv==1.0.0
-httpx==0.24.1
-python-multipart==0.0.6
-requests==2.31.0
-supabase==2.0.2
-firebase-admin==6.5.0
+# Core dependencies
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.17
+pydantic==2.10.4
+python-dotenv==1.0.1
+
+# YouTube extraction with yt-dlp
+yt-dlp==2025.9.23
+brotli==1.1.0
+mutagen==1.47.0
+pycryptodomex==3.21.0
+websockets==14.1
+
+# AI/LLM
+openai==1.59.5
+langchain==0.3.13
+langchain-community==0.3.13
+langchain-openai==0.2.14
+
+# Database
+supabase==2.11.2
+
+# Firebase/FCM
+firebase-admin==6.6.0
+google-api-python-client==2.158.0
+google-auth==2.38.0
+google-auth-httplib2==0.2.0
+
+# Utils
+requests==2.32.3
+aiofiles==24.1.0
+tenacity==9.0.0
+httpx==0.28.1
+
+# Type checking
+mypy==1.14.1
+types-requests==2.32.0.20241016
